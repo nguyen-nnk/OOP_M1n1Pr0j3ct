@@ -1,0 +1,10 @@
+build/
+*.o
+*.out
+*.exe
+results/*.csv
+report/*.aux
+report/*.log
+report/*.out
+report/*.toc
+report/*.pdf

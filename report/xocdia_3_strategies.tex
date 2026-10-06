@@ -1,0 +1,225 @@
+\documentclass[12pt,a4paper]{article}
+
+\usepackage{fontspec}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{xcolor}
+\usepackage{listings}
+
+\geometry{margin=2.5cm}
+\hypersetup{colorlinks=true, linkcolor=blue, urlcolor=blue}
+\setmainfont{DejaVu Serif}
+\setsansfont{DejaVu Sans}
+\setmonofont{DejaVu Sans Mono}
+\lstset{
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  frame=single,
+  columns=fullflexible
+}
+
+\title{\textbf{Mô phỏng và phân tích chiến thuật đặt cược trong game xóc đĩa}\\
+\large C++17 -- OOP -- Strategy Pattern -- Monte Carlo Simulation}
+\author{Sinh viên: \qquad MSSV: \qquad Lớp:}
+\date{2026}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+\section*{Tóm tắt}
+\addcontentsline{toc}{section}{Tóm tắt}
+Báo cáo này trình bày một chương trình C++17 mô phỏng cửa chẵn/lẻ trong game xóc đĩa bằng thiết kế hướng đối tượng. Phần mô phỏng chỉ khảo sát đúng ba chiến thuật: Flatbet, Martingale và Oscar's Grind. Mục tiêu không phải tìm cách thắng chắc, mà là dùng mô phỏng Monte Carlo để so sánh kỳ vọng lợi nhuận, độ biến động, drawdown, tổng tiền đã cược và rủi ro cháy vốn.
+
+Kết luận cốt lõi là chiến thuật đặt cược không làm thay đổi xác suất thắng của từng lượt. Khi payout nhỏ hơn 1:1, ví dụ thắng chỉ lời \(0.96\) lần tiền cược, mỗi đơn vị tiền cược có kỳ vọng âm. Các progression strategy như Martingale hoặc Oscar's Grind chủ yếu thay đổi hình dạng phân phối lời/lỗ: có thể tạo nhiều phiên lời nhỏ hơn, nhưng đổi lại là drawdown hoặc rủi ro tail loss cao hơn Flatbet.
+
+\section{Mục tiêu đồ án}
+Đồ án có hai mục tiêu chính:
+\begin{itemize}
+  \item Thiết kế chương trình mô phỏng bằng C++17 theo hướng đối tượng, tách lớp rõ ràng giữa game, strategy, simulator và thống kê.
+  \item So sánh ba chiến thuật đặt cược dưới cùng một cấu hình mô phỏng để đánh giá tính ổn định thay vì chỉ nhìn vào vài phiên thắng/thua ngắn.
+\end{itemize}
+
+Ba chiến thuật được chọn là:
+\begin{enumerate}
+  \item \textbf{Flatbet}: luôn đặt cùng một lượng tiền.
+  \item \textbf{Martingale}: thua thì gấp đôi, thắng thì reset.
+  \item \textbf{Oscar's Grind}: tăng chậm sau thắng và reset khi chu kỳ lời một đơn vị.
+\end{enumerate}
+
+\section{Luật chơi và mô hình xác suất}
+Chương trình mô phỏng cửa chẵn/lẻ của xóc đĩa. Mỗi lượt có 4 quân vị độc lập, mỗi quân có hai mặt. Gọi \(\theta\) là xác suất một quân ra mặt đỏ và \(K\) là số quân đỏ sau một lượt xóc:
+\[
+K \sim Binomial(n=4,\theta).
+\]
+
+Cửa chẵn thắng nếu \(K \in \{0,2,4\}\), cửa lẻ thắng nếu \(K \in \{1,3\}\). Xác suất cửa chẵn là:
+\[
+P(\text{chẵn})=(1-\theta)^4+6\theta^2(1-\theta)^2+\theta^4.
+\]
+
+Khi \(\theta=0.5\):
+\[
+P(\text{chẵn})=P(\text{lẻ})=0.5.
+\]
+
+\section{Kỳ vọng của một lượt cược}
+Gọi \(b\) là số tiền cược, \(p\) là xác suất thắng, và \(a\) là hệ số lời ròng khi thắng. Nếu thắng, lợi nhuận là \(+ab\). Nếu thua, lợi nhuận là \(-b\). Kỳ vọng một lượt cược là:
+\[
+E[X]=p(ab)+(1-p)(-b)=b(pa-(1-p)).
+\]
+
+Với cửa chẵn/lẻ công bằng về xác suất, \(p=0.5\), nên:
+\[
+E[X]=\frac{b}{2}(a-1).
+\]
+
+Nếu payout \(a=1.00\), kỳ vọng mỗi unit bằng 0. Nếu payout \(a=0.96\), kỳ vọng là \(-0.02b\), tức trung bình lỗ 2\% trên tổng tiền đã cược.
+
+\section{Ba chiến thuật đặt cược}
+\subsection{Flatbet}
+Flatbet luôn đặt \(b\) ở mỗi lượt. Đây là baseline quan trọng nhất vì tổng wager được kiểm soát trực tiếp:
+\[
+W=Nb
+\]
+với \(N\) là số round. Flatbet không có cơ chế gỡ lỗ, nhưng có ưu điểm là dễ kiểm chứng, biến động thấp hơn và ít rủi ro cháy vốn nếu \(b\) nhỏ so với bankroll.
+
+\subsection{Martingale}
+Martingale tăng cược theo cấp số nhân sau mỗi lượt thua:
+\[
+b, 2b, 4b, 8b, \ldots
+\]
+Sau một lượt thắng, strategy reset về \(b\). Nếu thua liên tiếp \(k\) lượt, tổng tiền đã mất là:
+\[
+C_k=b(2^k-1).
+\]
+
+Trong mô hình lý tưởng không giới hạn bankroll và table limit, một lượt thắng sau chuỗi thua có thể bù lỗ và lời một base unit. Trong thực tế mô phỏng, bankroll hữu hạn làm rủi ro cháy vốn xuất hiện rất nhanh vì mức cược tăng theo hàm mũ.
+
+\subsection{Oscar's Grind}
+Oscar's Grind là positive progression tăng chậm. Trong bản mô phỏng này:
+\begin{itemize}
+  \item Sau thua: giữ nguyên mức cược hiện tại.
+  \item Sau thắng: tăng thêm một base unit nếu chu kỳ chưa đạt mục tiêu.
+  \item Khi lợi nhuận chu kỳ đạt ít nhất một base unit: reset về base bet.
+\end{itemize}
+
+Strategy này cần lưu trạng thái chu kỳ, gồm current bet và cycle profit. Vì vậy Oscar's Grind thể hiện rõ lợi ích của Strategy Pattern: simulator không cần biết chi tiết thuật toán, chỉ gọi \texttt{nextBet()} và \texttt{recordResult()}.
+
+\section{Thiết kế hướng đối tượng}
+Chương trình dùng Strategy Pattern. Các lớp chính:
+\begin{itemize}
+  \item \texttt{XocDiaGame}: sinh kết quả xóc đĩa và kiểm tra cửa thắng.
+  \item \texttt{BettingStrategy}: abstract base class cho các chiến thuật.
+  \item \texttt{FlatBetStrategy}, \texttt{MartingaleStrategy}, \texttt{OscarsGrindStrategy}: ba lớp strategy cụ thể.
+  \item \texttt{Simulator}: chạy nhiều player, cập nhật bankroll và thống kê.
+  \item \texttt{SimulationConfig}: lưu cấu hình mô phỏng.
+  \item \texttt{SessionResult} và \texttt{SummaryStats}: lưu kết quả một player và thống kê tổng hợp.
+\end{itemize}
+
+Interface strategy rút gọn:
+\begin{lstlisting}[language=C++]
+class BettingStrategy {
+public:
+    virtual ~BettingStrategy() = default;
+    virtual std::string name() const = 0;
+    virtual void reset(double baseBet);
+    virtual double nextBet(double currentBankroll, double tableLimit) = 0;
+    virtual void recordResult(bool win, double amount,
+                              double payoutMultiplier) = 0;
+    virtual std::unique_ptr<BettingStrategy> clone() const = 0;
+};
+\end{lstlisting}
+
+\section{Cấu hình mô phỏng và chỉ số đánh giá}
+Cấu hình mặc định:
+\begin{table}[h]
+\centering
+\begin{tabular}{lr}
+\toprule
+Tham số & Giá trị \\
+\midrule
+Players & 5000 \\
+Rounds & 200 \\
+Initial bankroll & 1000 units \\
+Base bet & 10 units \\
+Payout & 0.96 \\
+Probability red & 0.5 \\
+Seed & 42 \\
+Table limit & 0, nghĩa là không giới hạn explicit \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Các chỉ số dùng để so sánh:
+\begin{itemize}
+  \item Mean profit và median profit.
+  \item StdDev profit.
+  \item Profit player rate.
+  \item Bankruptcy rate.
+  \item Average max drawdown.
+  \item Average total wagered.
+\end{itemize}
+
+\section{Kết quả mô phỏng}
+Bảng sau được lấy từ chương trình C++ với cấu hình:
+\begin{lstlisting}
+./build/xocdia --strategy all --players 1000 --rounds 200 \
+  --bankroll 1000 --base 10 --payout 0.96 --seed 42
+\end{lstlisting}
+
+\begin{center}
+\begin{longtable}{lrrrrrrr}
+\toprule
+Strategy & Mean & Median & StdDev & Profit\% & Ruin\% & AvgDD & AvgWager \\
+\midrule
+Flatbet & -40.78 & -40.00 & 141.11 & 36.40 & 0.00 & 183.60 & 2000.00 \\
+Martingale & -74.44 & -96.01 & 882.00 & 49.00 & 44.90 & 916.22 & 5125.62 \\
+Oscar's Grind & -117.67 & 52.80 & 837.61 & 50.80 & 44.70 & 927.22 & 7871.84 \\
+\bottomrule
+\end{longtable}
+\end{center}
+
+Khi payout nhỏ hơn 1, strategy có average total wagered càng lớn thì kỳ vọng lỗ càng lớn. Vì vậy bảng kết quả cần được đọc cùng lúc với AvgDD, Ruin\% và AvgWager, không chỉ nhìn Profit\%.
+
+\section{Hướng dẫn chạy}
+Build project:
+\begin{lstlisting}
+source ~/.bashrc; cmake -S . -B build
+source ~/.bashrc; cmake --build build
+\end{lstlisting}
+
+Chạy giao diện console:
+\begin{lstlisting}
+source ~/.bashrc; ./build/xocdia
+\end{lstlisting}
+
+Chạy CLI tái lập:
+\begin{lstlisting}
+source ~/.bashrc; ./build/xocdia --strategy all --players 5000 \
+  --rounds 200 --bankroll 1000 --base 10 --payout 0.96 \
+  --seed 42 --csv results/summary.csv
+\end{lstlisting}
+
+Chạy test:
+\begin{lstlisting}
+source ~/.bashrc; ./build/strategy_tests
+\end{lstlisting}
+
+Biên dịch báo cáo:
+\begin{lstlisting}
+source ~/.bashrc; lualatex -interaction=nonstopmode \
+  -output-directory report report/xocdia_3_strategies.tex
+\end{lstlisting}
+
+\section{Kết luận}
+Flatbet là strategy ổn định nhất nếu tiêu chí là kiểm soát biến động và tránh tail risk. Martingale thường tạo cảm giác thắng đều trong ngắn hạn, nhưng mức cược tăng theo hàm mũ khiến drawdown và rủi ro cháy vốn cao khi gặp chuỗi thua. Oscar's Grind tăng chậm hơn Martingale và có cơ chế chu kỳ, nhưng vẫn không thể thay đổi kỳ vọng toán học của game.
+
+Về mặt OOP, bài toán phù hợp để minh họa abstract class, polymorphism, Strategy Pattern, factory function, tách trách nhiệm module và mô phỏng Monte Carlo có khả năng mở rộng.
+
+\end{document}
